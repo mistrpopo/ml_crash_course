@@ -9,8 +9,21 @@ import pandas as pd
 from sklearn import metrics
 import tensorflow as tf
 from tensorflow.python.data import Dataset
+import os
 
+# The ML course was done on TF 1.15 version (we are now at TF v2)
 print(tf.__version__)
+# 1.15.0
+
+# TF fails to run if Cuda is available and the GPU device is not advanced enough :
+# Ignoring visible gpu device (device: 0, name: NVS 5200M, pci bus id: 0000:01:00.0, compute capability: 2.1) with Cuda compute capability 2.1. The minimum required Cuda capability is 3.5.
+# Disabling Cuda visible devices in order to run on CPU
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
+if tf.test.gpu_device_name():
+    print('GPU found')
+else:
+    print("No GPU found")
 
 # was removed in TF v2
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -58,7 +71,7 @@ print(type(california_housing_dataframe[["total_rooms"]]))
 # Define the input feature: total_rooms.
 my_feature = california_housing_dataframe[["total_rooms"]]
 
-# Configure a numeric feature column for total_rooms.
+# Configure a feature column for total_rooms. Use numeric_column, which specifies its data is numeric
 feature_columns = [tf.feature_column.numeric_column("total_rooms")]
 
 # Define the label (our target, which is median_house_value.)
@@ -140,3 +153,70 @@ mean_squared_error = metrics.mean_squared_error(predictions, targets)
 root_mean_squared_error = math.sqrt(mean_squared_error)
 print("Mean Squared Error (on training data): %0.3f" % mean_squared_error)
 print("Root Mean Squared Error (on training data): %0.3f" % root_mean_squared_error)
+# Mean Squared Error (on training data): 56367.025
+# Root Mean Squared Error (on training data): 237.417
+
+
+# Let's compare the RMSE to the difference of the min and max of our targets:
+min_house_value = california_housing_dataframe["median_house_value"].min()
+max_house_value = california_housing_dataframe["median_house_value"].max()
+min_max_difference = max_house_value - min_house_value
+
+print("Min. Median House Value: %0.3f" % min_house_value)
+print("Max. Median House Value: %0.3f" % max_house_value)
+print("Difference between Min. and Max.: %0.3f" % min_max_difference)
+print("Root Mean Squared Error: %0.3f" % root_mean_squared_error)
+# Min. Median House Value: 14.999
+# Max. Median House Value: 500.001
+# Difference between Min. and Max.: 485.002
+# Our error spans nearly half the range of the target values. Can we do better?
+
+
+calibration_data = pd.DataFrame()
+calibration_data["predictions"] = pd.Series(predictions)
+calibration_data["targets"] = pd.Series(targets)
+print(calibration_data.describe())
+#        predictions  targets
+# count      17000.0  17000.0
+# mean           0.1    207.3
+# std            0.1    116.0
+# min            0.0     15.0
+# 25%            0.1    119.4
+# 50%            0.1    180.4
+# 75%            0.2    265.0
+# max            1.9    500.0
+
+# It looks way off
+# This was with a learning rate of 0.0000001 and 100 steps
+
+
+# get a uniform random sample of the data so we can make a readable scatter plot.
+sample = california_housing_dataframe.sample(n=300)
+
+# Get the min and max total_rooms values.
+x_0 = sample["total_rooms"].min()
+x_1 = sample["total_rooms"].max()
+
+# Retrieve the final weight and bias generated during training.
+weight = linear_regressor.get_variable_value('linear/linear_model/total_rooms/weights')[0]
+bias = linear_regressor.get_variable_value('linear/linear_model/bias_weights')
+
+# Get the predicted median_house_values for the min and max total_rooms values.
+y_0 = weight * x_0 + bias 
+y_1 = weight * x_1 + bias
+
+# Plot our regression line from (x_0, y_0) to (x_1, y_1).
+plt.plot([x_0, x_1], [y_0, y_1], c='r')
+
+# Label the graph axes.
+plt.ylabel("median_house_value")
+plt.xlabel("total_rooms")
+
+# Plot a scatter plot from our data sample.
+plt.scatter(sample["total_rooms"], sample["median_house_value"])
+
+# Display graph.
+plt.show()
+# After plotting, it's obvious that the learning rate is too low (or not enough steps)
+
+aaa = 1
