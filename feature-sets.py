@@ -246,7 +246,8 @@ def train_model(
     training_rmse.append(training_root_mean_squared_error)
     validation_rmse.append(validation_root_mean_squared_error)
   print("Model training finished.")
-
+  print("Final RMSE (on validation data):")
+  print("%0.2f" % validation_root_mean_squared_error)
   
   # Output a graph of loss metrics over periods.
   plt.ylabel("RMSE")
@@ -282,13 +283,14 @@ minimal_validation_examples = validation_examples[minimal_features]
 
 # Make Better Use of Latitude and Longitude
 # Plotting latitude against house value
-plt.scatter(training_examples["latitude"], training_targets["median_house_value"])
+#plt.scatter(training_examples["latitude"], training_targets["median_house_value"])
 # Result  => there isn't a linear relationship between those
 # Instead => cluster of points with high values around LA and SF (latitude ~34 and ~38)
-plt.show()
-plt.scatter(training_examples["longitude"], training_targets["median_house_value"])
-plt.show()
+#plt.show()
+#plt.scatter(training_examples["longitude"], training_targets["median_house_value"])
+#plt.show()
 # Same with longitude => -122.5 and -118
+# Those spots correspond roughly to the most expensive cities in the state (SF and LA)
 
 # Two better options to use this data
 
@@ -300,9 +302,133 @@ plt.show()
 # Fresno FR => (36.7, -119.8)
 # Sacramento SA => (38.6, -121.5)
 
+big_cities_coordinates = [
+["SF", 37.8, -122.4],
+["LA", 34.0, -118.2],
+["SD", 32.7, -117.2],
+["SJ", 37.3, -121.9],
+["FR", 36.7, -119.8],
+["SA", 38.6, -121.5]
+]
+
+print (big_cities_coordinates)
+print (big_cities_coordinates[0])
+print (big_cities_coordinates[0][1])
+
+def select_and_transform_features(source_df):
+  transformed_df = pd.DataFrame()
+  # keep median income as is
+  transformed_df["median_income"] = source_df["median_income"]
+  for r in big_cities_coordinates:
+    transformed_df["distance_to_%s" % r[0]] = ((source_df["latitude"] - r[1]).pow(2) + (source_df["longitude"] - r[2]).pow(2)).pow(0.5)
+  return transformed_df
+
+selected_training_examples = select_and_transform_features(training_examples)
+
+selected_validation_examples = select_and_transform_features(validation_examples)
+
+print (selected_training_examples.describe())
+correlation_dataframe = selected_training_examples.copy()
+correlation_dataframe["target"] = training_targets["median_house_value"]
+print(correlation_dataframe.corr())
+#                 median_income  distance_to_SF  distance_to_LA  distance_to_SD  distance_to_SJ  distance_to_FR  distance_to_SA  target
+# median_income             1.0            -0.0            -0.1            -0.1            -0.0             0.0             0.0     0.7
+# distance_to_SF           -0.0             1.0            -0.9            -0.9             1.0             0.5             1.0    -0.0
+# distance_to_LA           -0.1            -0.9             1.0             1.0            -0.8            -0.2            -0.9    -0.1
+# distance_to_SD           -0.1            -0.9             1.0             1.0            -0.9            -0.4            -0.9    -0.1
+# distance_to_SJ           -0.0             1.0            -0.8            -0.9             1.0             0.6             1.0    -0.0
+# distance_to_FR            0.0             0.5            -0.2            -0.4             0.6             1.0             0.6     0.1
+# distance_to_SA            0.0             1.0            -0.9            -0.9             1.0             0.6             1.0     0.1
+# target                    0.7            -0.0            -0.1            -0.1            -0.0             0.1             0.1     1.0
+
+# no better correlation (going far from LA could get you closer to SF, after all)
+# but maybe a linear combination of those would work
+
+# _ = train_model(
+#     learning_rate=0.02,
+#     steps=1000,
+#     batch_size=5,
+#     training_examples=selected_training_examples,
+#     training_targets=training_targets,
+#     validation_examples=selected_validation_examples,
+#     validation_targets=validation_targets)
+# Final RMSE (on validation data):
+# 91.09
+
 # 2) Create bins for each square (lat_long_32_-122, lat_long_32_-121, ...)
 # Works fine if the epicenters can't be located (big cities)
 # creates more features (less efficient, but no one cares anymore)
 # The course suggests to do this only for latitudes (so use bands instead of squares)
+
+def select_and_transform_features_2(source_df):
+  LATITUDE_RANGES = zip(range(32, 44), range(33, 45))
+  selected_examples = pd.DataFrame()
+  selected_examples["median_income"] = source_df["median_income"]
+  for r in LATITUDE_RANGES:
+    selected_examples["latitude_%d_to_%d" % r] = source_df["latitude"].apply(
+      lambda l: 1.0 if l >= r[0] and l < r[1] else 0.0)
+  return selected_examples
+
+selected_training_examples = select_and_transform_features_2(training_examples)
+selected_validation_examples = select_and_transform_features_2(validation_examples)
+
+print (selected_training_examples.describe())
+correlation_dataframe = selected_training_examples.copy()
+correlation_dataframe["target"] = training_targets["median_house_value"]
+print(correlation_dataframe.corr())
+#                    median_income  latitude_32_to_33  latitude_33_to_34  latitude_34_to_35  latitude_35_to_36  ...  latitude_40_to_41  latitude_41_to_42  latitude_42_to_43  latitude_43_to_44  target
+# target                       0.7               -0.1                0.1                0.1               -0.1  ...               -0.1               -0.1                nan                nan     1.0
+
+# Correlation actually looks better (0.1 most of the time)
+# Of course this might be an artefact of comparing a bool feature with a double feature. I don't know.
+
+# _ = train_model(
+#     learning_rate=0.02,
+#     steps=1000,
+#     batch_size=5,
+#     training_examples=selected_training_examples,
+#     training_targets=training_targets,
+#     validation_examples=selected_validation_examples,
+#     validation_targets=validation_targets)
+# Final RMSE (on validation data):
+# 83.35
+
+
+# 3) Let's try creating bins for each square (lat_long_32_-122, lat_long_32_-121, ...)
+
+def select_and_transform_features_3(source_df):
+  LATITUDE_RANGES = range(32, 43)
+  LONGITUDE_RANGES = range(-126, -115)
+  selected_examples = pd.DataFrame()
+  selected_examples["median_income"] = source_df["median_income"]
+  for r in LATITUDE_RANGES:
+    for s in LONGITUDE_RANGES:
+      lats = source_df["latitude"].apply(
+        lambda l: 1.0 if l >= r and l < r + 1 else 0.0)
+      longs = source_df["longitude"].apply(
+        lambda L: 1.0 if L >= s and L < s + 1 else 0.0)
+      selected_examples["l_%d_L_%d" % (r,s)] = lats * longs
+  return selected_examples
+
+selected_training_examples = select_and_transform_features_3(training_examples)
+print(selected_training_examples.describe())
+selected_validation_examples = select_and_transform_features_3(validation_examples)
+
+
+
+_ = train_model(
+    learning_rate=0.02,
+    steps=1000,
+    batch_size=5,
+    training_examples=selected_training_examples,
+    training_targets=training_targets,
+    validation_examples=selected_validation_examples,
+    validation_targets=validation_targets)
+# Final RMSE (on validation data):
+# 81.58
+
+# too slow and inefficient ... 11*11=121 new input features entering the model
+# And all features have mostly 0s except for the rows actually in the right bin
+# see feature-cross one-hot vectors
 
 aaa = 1
